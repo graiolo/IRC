@@ -8,12 +8,13 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    steps:
-    - name: checkout repo
-      uses: actions/checkout@main
-    - name: build application
-      run: make
-    - name: clean
-      run: make fclean
 
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    - name: make
+      run: make
+    - name: make fclean
+      run: make fclean
