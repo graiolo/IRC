@@ -15,8 +15,8 @@ jobs:
     - name: make
       working-directory: ../../
       run: |
-          make
           pwd
+          make
     - name: make flcean
       working-directory: ../../
       run: make flcean
