@@ -14,7 +14,9 @@ jobs:
     steps:
     - name: make
       working-directory: ../../
-      run: make
+      run: |
+          make
+          pwd
     - name: make flcean
       working-directory: ../../
       run: make flcean
