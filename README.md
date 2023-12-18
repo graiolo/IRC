@@ -1,6 +1,6 @@
 # to do list:
 
-- scompattere la classe server in 3 sotto classi
+- scompattere la classe server in 3 sotto classi:
   - server
   - client
   - channel
