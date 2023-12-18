@@ -13,11 +13,9 @@ jobs:
 
     steps:
     - name: make
-      working-directory: irc
       run: |
           pwd
           ls
           make
     - name: make flcean
-      working-directory: irc
       run: make flcean
