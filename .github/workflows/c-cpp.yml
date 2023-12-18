@@ -13,8 +13,8 @@ jobs:
 
     steps:
     - name: make
+      working-directory: ../../
       run: make
-      working-directory: ../../
     - name: make flcean
-      run: make flcean
       working-directory: ../../
+      run: make flcean
