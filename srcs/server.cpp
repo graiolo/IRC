@@ -7,11 +7,11 @@ std::map<int, struct ClientInfo>		Server::_client_info;
 struct epoll_event 						Server::_events[MAX_CLIENTS + 1];
 
 Server::Server(int port, char *passwd) {
-	memset(&_server, 0, sizeof(_server));
+	memset(reinterpret_cast<char*>(&_server), 0, sizeof(_server));
 	_server.port = port;
 	_server.passwd = passwd;
 
-	memset(_events, 0 , sizeof(_events));
+	memset(reinterpret_cast<char*>(&_events), 0, sizeof(_events));
 }
 
 Server::~Server( ) { }
@@ -60,7 +60,8 @@ void	Server::addServerToEpoll( ) {
 
 int Server::addClinetToEpoll(int newSocket) {
 	struct epoll_event event;
-	memset(&event, 0 , sizeof(event));
+
+	memset(reinterpret_cast<char*>(&event), 0, sizeof(event));
 	event.events = EPOLLIN | EPOLLET;
 	event.data.fd = newSocket;
 	if (epoll_ctl(_server.epollFd, EPOLL_CTL_ADD, newSocket, &event) == -1) {
@@ -92,7 +93,9 @@ void Server::newClient( ) {
 	}
 	ClientInfo  info;
 	std::cout << "New Client Request" << std::endl;
-	memset(&info, 0, sizeof(info));
+	memset(reinterpret_cast<char*>(&info), 0, sizeof(info));
+
+	
 	// Accept client connection and create a new socket
 	int clientFd = accept(_server.socket, (struct sockaddr*)&info.addr, &info.addrLen);
 	// Set the client socket to non-blocking mode
