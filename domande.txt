@@ -1,0 +1,4 @@
+nella funzione login0(fd) in server.cpp, cosa significa CAP LS 302?
+capire se scorporare la struttura channel e aggiungere i set nella classe o sostituirli direttamente con la map di client. 
+//bisogna capire come conviene gestire i canali! arrivata a 282 di server.cpp 
+decidiamo se i canali sono una lista di oggetti gestiti dal server oppure se i canali li infiliamo nei client ma non credo sinceramente!
