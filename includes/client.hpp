@@ -3,8 +3,7 @@
 # include "ircserver.hpp"
 
 
-# define MAX_CLIENTS 104 // Maximum number of clients the server will allow
-# define HEADER "CAP LS 302"
+
 
 class Client
 {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 # include <iostream>
 # include <cstdlib>
 # include <cstring>
@@ -23,8 +24,13 @@
 # include <stack>
 # include <arpa/inet.h>
 # include <netdb.h>
+#include <fstream>
+
 
 extern char				hostname[256];
+#define MSG (MSG_DONTWAIT | MSG_NOSIGNAL)
+# define MAX_CLIENTS 1024 // Maximum number of clients the server will allow
+# define HEADER "CAP LS 302"
 
 // Structure to hold information about each client
 struct ClientInfo {

@@ -107,7 +107,7 @@ void Client::setMsg(std::string msg)
 void	Client::ping(int fd)
 {
 	std::string PONG = "PONG " + std::string(std::strtok(&_info.msg[5], "\n")) + "\r\n";
-	send(fd, PONG.c_str(), PONG.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+	send(fd, PONG.c_str(), PONG.size(), MSG);
 } 
 
 /**

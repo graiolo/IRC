@@ -1,14 +1,6 @@
 #include "../includes/server.hpp"
 #include "../includes/ircserver.hpp"
-/**
- * Breve descrizione della funzione.
- * 
- * Descrizione più dettagliata della funzione, inclusi parametri e valori restituiti.
- *
- * @param parametro1 Descrizione del parametro 1.
- * @param parametro2 Descrizione del parametro 2.
- * @return Descrizione del valore restituito.
- */
+
 // Static member initializion
 ServerData						Server::_server;
 std::map<std::string, Channel>			Server::_channels;
@@ -28,7 +20,6 @@ Server::Server(int port, char *passwd) {
 	memset(reinterpret_cast<char*>(&_server), 0, sizeof(_server));
 	_server.port = port;
 	_server.passwd = passwd;
-
 	memset(reinterpret_cast<char*>(&_events), 0, sizeof(_events));
 }
 
@@ -40,7 +31,7 @@ Server::~Server( ) { }
  * @return void 
  */
 void Server::serverInit( ) {
-	// Create a socket
+	// Create a socket to manage connections and listen on
 	_server.socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (_server.socket < 0)
 		throw std::runtime_error ("ERROR: Failed to open socket");
@@ -60,12 +51,17 @@ void Server::serverInit( ) {
 	_server.addr.sin_addr = *((in_addr*) gethostbyname(hostname)->h_addr_list[0]); //inet_addr("ip of local machine");
 	_server.IP = inet_ntoa(_server.addr.sin_addr);
 
-	// Bind our socket to the port
+	//Damiano
+
+	if (fcntl(_server.socket, F_SETFL, O_NONBLOCK) < 0)
+		throw std::runtime_error ("ERROR: Failed to set non-blocking socket");
+
+	// Bind our socket to the port (associate IP e port to socket)
 	if (bind(_server.socket, (sockaddr *) &_server.addr, sizeof(_server.addr)) == -1)
 		throw std::runtime_error ("ERROR: Failed to bind to socket");
 
 	// Start listening on with the socket
-	if (listen(_server.socket, 5) == -1) // The 5 here is the maximum number of backlog connections
+	if (listen(_server.socket, 10000) == -1) // The 5 here is the maximum number of backlog connections
 		throw std::runtime_error ("ERROR: listen failed");
 
 	_server.isRun = true;
@@ -111,7 +107,7 @@ int Server::addClientToEpoll(int newSocket) {
 	epoll_event event;
 
 	memset(reinterpret_cast<char*>(&event), 0, sizeof(event));
-	event.events = EPOLLIN | EPOLLET;
+	event.events = EPOLLIN;
 	event.data.fd = newSocket;
 	if (epoll_ctl(_server.epollFd, EPOLL_CTL_ADD, newSocket, &event) == -1) {
 		perror("Error adding socket to epoll");
@@ -130,14 +126,18 @@ int Server::addClientToEpoll(int newSocket) {
  */
 void Server::runServer( ) {
 	while (_server.isRun) {
-		int eventDetect = epoll_wait(_server.epollFd, _events, MAX_CLIENTS, 0);
+		int eventDetect = epoll_wait(_server.epollFd, _events, MAX_CLIENTS, -1);
+		
 		for (int i = 0; i < eventDetect; i++) {
 			int clientSocket = _events[i].data.fd;
 			if (clientSocket == _server.socket)
 				Server::newClient( );
 			else if (clientSocket != -1)
 				recvMessage(clientSocket);
+			else
+				exit(EXIT_FAILURE);
 		}
+		std::cout << "eventDetect: " << eventDetect << std::endl;
 	}
 	//Close all client_soket
 	close(_server.epollFd);
@@ -179,7 +179,11 @@ void Server::newClient() {
  *  */
 void Server::recvMessage(int fd) {
 	char buffer[1024] = {0};
-	size_t byte = recv(fd, buffer, 1023, 0);
+	int byte = recv(fd, buffer, 1023, 0);
+	if (byte <= 0) {
+		quit(fd);
+		return ;
+	}
 	if (_clients.find(fd) != _clients.end())
 	{
 		std::string clientMsg =_clients[fd].getinfo().msg + buffer;
@@ -189,10 +193,7 @@ void Server::recvMessage(int fd) {
 	{
 		std::cout << "Client not found" << std::endl;
 		return ;
-	}
-	if (!byte) {
-		quit(fd);
-		return ;
+		exit (EXIT_FAILURE);
 	}
 	std::string clientMsg =_clients[fd].getinfo().msg;
 	if (!std::strchr(buffer, '\n'))
@@ -209,7 +210,8 @@ void Server::recvMessage(int fd) {
 		else 
 			commands(fd);
 		}
-		_clients[fd].clearMsg();
+		if (_clients.find(fd) != _clients.end())
+			_clients[fd].clearMsg();
 }
 
 /**
@@ -234,7 +236,7 @@ void Server::login(int fd)
 		// std::cout << "sono sttao autorizzato con fd " << fd << " sono autorizzato? : "  <<  _clients[fd].getinfo().authorized << std::endl;
 		if (_clients[fd].getinfo().isFirstTime == true) {
 			if (((sNull.compare("PASS\0") && _clients[fd].getinfo().msg.compare(HEADER)) || _server.connected_clients + 1 > MAX_CLIENTS)) {
-				send(fd, ERR_CONNREFUSE.c_str( ), ERR_CONNREFUSE.size( ), MSG_DONTWAIT | MSG_NOSIGNAL);
+				send(fd, ERR_CONNREFUSE.c_str( ), ERR_CONNREFUSE.size( ), MSG);
 				_clients.erase(fd);
 				close(fd);
 				return ;
@@ -246,9 +248,10 @@ void Server::login(int fd)
 				_clients[fd].setPasswd(&input[1]);
 			else {
 				std::string ERR_PASSWDMISMATCH = ":ircserv 464 :Password incorrect\r\n";
-				send(fd, ERR_PASSWDMISMATCH.c_str( ), ERR_PASSWDMISMATCH.size( ), MSG_DONTWAIT | MSG_NOSIGNAL);
-				send(fd, ERR_CONNREFUSE.c_str( ), ERR_CONNREFUSE.size( ), MSG_DONTWAIT | MSG_NOSIGNAL);
-				_clients.erase(fd);
+				send(fd, ERR_PASSWDMISMATCH.c_str( ), ERR_PASSWDMISMATCH.size( ), MSG);
+				send(fd, ERR_CONNREFUSE.c_str( ), ERR_CONNREFUSE.size( ), MSG);
+				if (_clients.find(fd) != _clients.end())
+					_clients.erase(fd);
 				close(fd);
 			}
 		}
@@ -259,7 +262,7 @@ void Server::login(int fd)
 					if (input == itC->second.Nickname()) {
 						printf("cilentfd %d username %s nickname %s\n", itC->first, itC->second.getinfo().username.c_str(), itC->second.getinfo().nickname.c_str());
 						std::string ERR_NICKNAMEINUSE = ":ircserv 433 * " + _clients[fd].Nickname() + " :Nickname is already in use\r\n";
-						send(fd, ERR_NICKNAMEINUSE.c_str(),ERR_NICKNAMEINUSE.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+						send(fd, ERR_NICKNAMEINUSE.c_str(),ERR_NICKNAMEINUSE.length(), MSG);
 						_clients[fd].clearMsg();
 						return ;
 					}
@@ -273,7 +276,9 @@ void Server::login(int fd)
 				_clients[fd].setAuthorized(true);
 				std::cout << "New Client connect" << std::endl;
 				Server::sendWelcomeBackToClient(fd);
-				_clients[fd].setMsg("JOIN #STOCAZZO");
+				if(_channels.empty())
+					addBot();
+				_clients[fd].setMsg("JOIN #WELCOME");
 				singleJoin(fd);
 				_clients[fd].clearMsg();
 			}
@@ -294,13 +299,13 @@ void Server::sendWelcomeBackToClient(int fd) {
 	std::string RPL_ISUPPORT = ":ircserv 005 " + _clients[fd].Nickname() + " operator ban limit invite key topic :are supported by this server\r\n";
 	std::string RPL_MOTD = ":ircserv 372 " + _clients[fd].Nickname() + " : Welcome to the ircserv\r\n";
 	std::string RPL_ENDOFMOTD = ":ircserv 376 " + _clients[fd].Nickname() + " :End of MOTD command\r\n";
-	send(fd, RPL_WELCOME.c_str(), RPL_WELCOME.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
-	send(fd, RPL_YOURHOST.c_str(), RPL_YOURHOST.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
-	send(fd, RPL_CREATED.c_str(), RPL_CREATED.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
-	send(fd, RPL_MYINFO.c_str(), RPL_MYINFO.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
-	send(fd, RPL_ISUPPORT.c_str(), RPL_ISUPPORT.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
-	send(fd, RPL_MOTD.c_str(), RPL_MOTD.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
-	send(fd, RPL_ENDOFMOTD.c_str(), RPL_ENDOFMOTD.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+	send(fd, RPL_WELCOME.c_str(), RPL_WELCOME.length(), MSG);
+	send(fd, RPL_YOURHOST.c_str(), RPL_YOURHOST.length(), MSG);
+	send(fd, RPL_CREATED.c_str(), RPL_CREATED.length(), MSG);
+	send(fd, RPL_MYINFO.c_str(), RPL_MYINFO.length(), MSG);
+	send(fd, RPL_ISUPPORT.c_str(), RPL_ISUPPORT.length(), MSG);
+	send(fd, RPL_MOTD.c_str(), RPL_MOTD.length(), MSG);
+	send(fd, RPL_ENDOFMOTD.c_str(), RPL_ENDOFMOTD.length(), MSG);
 }
 
 /**
@@ -316,7 +321,8 @@ void Server::newChannel(int fd, std::string channel_name, std::string passwd)
 {
 		_channels.insert(std::make_pair(&channel_name[1], Channel(&channel_name[1])));
 		_channels[&channel_name[1]].addParticipant(fd, _clients[fd].getinfo());
-		_channels[&channel_name[1]].addOperator(_clients[fd].Nickname(), fd);
+		if (_channels[&channel_name[1]].noOperators( ))
+			_channels[&channel_name[1]].addOperator(_clients[fd].Nickname(), fd);
 		if (!passwd.empty( ) && passwd.find(".") == std::string::npos) 
 			_channels[&channel_name[1]].setkey(passwd);
 }
@@ -343,9 +349,9 @@ void Server::singleJoin(int fd) {
 		_channels[ch_name].setkey(passwd);
 		_channels[ch_name].sendToAllUserModeChanges(_clients[fd].Nickname(), "+k");
 	}
-	} else if (_channels[ch_name].wrongPass(_clients[fd].Nickname(), fd, passwd) ||
-			_channels[ch_name].onlyInvite(_clients[fd].Nickname(), ch_name) ||
-			_channels[ch_name].channelIsFull(_clients[fd].Nickname(), ch_name) ||
+	}else if (_channels[ch_name].wrongPass(_clients[fd].Nickname(), fd, passwd) ||
+			_channels[ch_name].onlyInvite(_clients[fd].Nickname(),fd, ch_name) ||
+			_channels[ch_name].channelIsFull(_clients[fd].Nickname(),fd, ch_name) ||
 			_channels[ch_name].clientIsInChannel(_clients[fd].Nickname(), fd)) {
 			return ;
 	}
@@ -372,7 +378,7 @@ void	Server::commands(int fd) {
 	else if (command.size( ) > 6 && command.substr(0, 6) == "JOIN #") 
 		multiJoin(fd);
 	else if (command.size( ) > 6 && command.substr(0, 6) == "PART #")
-		multiPart(fd, true);
+		multiPart(fd);
 	else if (command.substr(0, 4) == "QUIT")
 		quit(fd);
 	else if (command.size( ) > 6 && command.substr(0, 6) == "MODE #")
@@ -391,9 +397,11 @@ void	Server::commands(int fd) {
 		for (std::map<int, Client>::iterator itC = cp_client.begin( ) ; itC != cp_client.end( ) ; ++itC)
 			quit(itC->first);
 		std::cout << "[isRun]Shutdown of IRC" << std::endl;
+		close(_server.socket);
+		return ;
 	} else if (!((command.size( ) > 4 && command.substr(0, 4) == "WHO ") || (command.size( ) > 9 && command.substr(0, 9) == "USERHOST "))) {
 		std::string ERR_UNKNOWNCOMMAND = ":ircserv 421 " + _clients[fd].Nickname() + " " + command + " :Unknown command\r\n";
-		send(fd, ERR_UNKNOWNCOMMAND.c_str(), ERR_UNKNOWNCOMMAND.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_UNKNOWNCOMMAND.c_str(), ERR_UNKNOWNCOMMAND.length(), MSG);
 	}
 	_clients[fd].clearMsg();
 }
@@ -406,7 +414,7 @@ void	Server::commands(int fd) {
  * @param flag flag.
  * 
  */
-void Server::multiPart(int fd, bool flag) {
+void Server::multiPart(int fd) {
 	std::istringstream iss(_clients[fd].getinfo().msg);
 	std::string sNull, sChannel, reason;
 	iss >> sNull >> sChannel;
@@ -416,7 +424,7 @@ void Server::multiPart(int fd, bool flag) {
 	std::deque<std::string>::iterator itS = channel.begin( );
 	for ( ; itS != channel.end( ); ++itS) {
 		_clients[fd].getinfo().msg = sNull + " " + *itS + " " + reason;
-		Server::singlePart(fd, flag);
+		Server::singlePart(fd);
 	}
 }
 
@@ -432,11 +440,23 @@ void Server::multiPart(int fd, bool flag) {
 bool Server::noSuchChannel(int fd, std::string channel_name) {
 	if (_channels.find(channel_name) == _channels.end()) {
 		std::string ERR_NOSUCHCHANNEL = ":ircserv 403 " + _clients[fd].getinfo().nickname + " " + &channel_name[1] + " :No such channel\r\n";
-		send(fd, ERR_NOSUCHCHANNEL.c_str(), ERR_NOSUCHCHANNEL.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_NOSUCHCHANNEL.c_str(), ERR_NOSUCHCHANNEL.length(), MSG);
 		return true;
 	}
 	return false;
 }
+
+// static void printmap(std::map<std::string, int> map) {
+// 	for (std::map<std::string, int>::iterator it = map.begin(); it != map.end(); ++it) {
+// 		std::cout << it->first << " STAMPO IL SECONDO " << it->second << std::endl;
+// 	}
+// }
+
+// static void printvector(std::vector<std::string> vec) {
+// 	for (std::vector<std::string>::iterator it = vec.begin(); it != vec.end(); ++it) {
+// 		std::cout << "JOINED: " << *it << std::endl;
+// 	}
+// }
 
 /**
  * Server singlePart
@@ -447,17 +467,15 @@ bool Server::noSuchChannel(int fd, std::string channel_name) {
  * @param flag flag to check if user is in channel.
  * 
  */
-void Server::singlePart(int fd, bool flag) {
+void Server::singlePart(int fd) {
 	std::istringstream iss(_clients[fd].getinfo().msg);
 	std::string sNull, channel_name, message;
 	iss >> sNull >> channel_name;
 	toUpper(channel_name);
-	if (flag == true) {
-		if (noSuchChannel(fd, &channel_name[1]))
-			return ;
-		if (_channels[&channel_name[1]].userIsNotInChannel(_clients[fd].Nickname()))
-			return ;
-	}
+	if (noSuchChannel(fd, &channel_name[1]))
+		return ;
+	if (_channels[&channel_name[1]].userIsNotInChannel(_clients[fd].Nickname()))
+		return ;
 	_channels[&channel_name[1]].removeParticipant(_clients[fd].Nickname());
 	_clients[fd].removeChannel(&channel_name[1]);
 	if (_channels[&channel_name[1]].channelIsEmpty()) {
@@ -503,22 +521,27 @@ void Server::multiJoin(int fd) {
  * @param fd file descriptor of client
  * 
 */
+
+//AGGIUSTA TUTTO. 
 void Server::quit(int fd) {
+	if (_clients.empty() || _clients.find(fd) == _clients.end())
+		return ;
 	std::map<int, Client> tmp_client = _clients;
 	std::vector<std::string>::iterator itC = tmp_client[fd].getinfo().joninedChannell.begin( );
 	for ( ; itC != tmp_client[fd].getinfo().joninedChannell.end( ); ++itC) {
 		std::string PART = "PART #" + *itC + "\r\n";
 		_clients[fd].setMsg(PART);
-		singlePart(fd, true);
+		singlePart(fd);
 	}
 	std::string PTR_QUIT = ":" + _clients[fd].Nickname() + "!" + hostname + " QUIT :Quit: Bye for now!\r\n";
-	send(fd, PTR_QUIT.c_str(), PTR_QUIT.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+	send(fd, PTR_QUIT.c_str(), PTR_QUIT.length(), MSG);
 	std::cout << _clients[fd].Nickname() << " :Quit" << std::endl;
-    if (epoll_ctl(_server.epollFd, EPOLL_CTL_DEL, fd, NULL) ==  -1) {
+    if (fd != 1000 && (epoll_ctl(_server.epollFd, EPOLL_CTL_DEL, fd, NULL) ==  -1)) {
         perror("Error removing client from epoll");
     }
 	close(fd);
-	_clients.erase(fd);
+	if (_clients.find(fd) != _clients.end())
+		_clients.erase(fd);
 	_server.connected_clients -= 1;
 }
 
@@ -558,7 +581,7 @@ void Server::singleMessage(int fd)
 	}
 	if (message.empty( )) {
 		std::string ERR_NOTEXTTOSEND = ":ircserv 421 " + _clients[fd].Nickname() +  " :No text to send\r\n";
-		send(fd, ERR_NOTEXTTOSEND.c_str(), ERR_NOTEXTTOSEND.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_NOTEXTTOSEND.c_str(), ERR_NOTEXTTOSEND.length(), MSG);
 		return ;
 	}
 	if (_clients[fd].Nickname() == target)
@@ -573,9 +596,11 @@ void Server::singleMessage(int fd)
 			{
 				if (it->first != _clients[fd].Nickname()) {
 					std::string RPL_PRIVMSG = ":" + _clients[fd].Nickname() + "!~" + hostname + " PRIVMSG " + target + " :" + message + "\r\n";
-					send(it->second, RPL_PRIVMSG.c_str(), RPL_PRIVMSG.size(), 0);
+					send(it->second, RPL_PRIVMSG.c_str(), RPL_PRIVMSG.size(), MSG);
 				}
 			}
+			if (!target.compare("#WELCOME") && !message.compare(0, 4, "!WE "))
+				botMode(message);
 		}
 	}
 	// Otherwise, the target is a user
@@ -583,11 +608,11 @@ void Server::singleMessage(int fd)
 		for (std::map<int, Client>::iterator it = _clients.begin(); it != _clients.end(); it++) {
 			if (it->second.Nickname() == target) {
 				std::string RPL_PRIVMSG = ":" + _clients[fd].Nickname() + "! PRIVMSG " + target + " :" + message + "\r\n";
-				send(it->first, RPL_PRIVMSG.c_str(), RPL_PRIVMSG.size(), 0);
+				send(it->first, RPL_PRIVMSG.c_str(), RPL_PRIVMSG.size(), MSG);
 				break;
 			} else if (it == _clients.end( )) {
 				std::string ERR_NOSUCHNICK = ":ircserv 401 " + _clients[fd].Nickname() + " " + target + " :No such nick\r\n";
-				send(fd, ERR_NOSUCHNICK.c_str(), ERR_NOSUCHNICK.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+				send(fd, ERR_NOSUCHNICK.c_str(), ERR_NOSUCHNICK.length(), MSG);
 			}
 		}
 	}
@@ -631,6 +656,13 @@ std::vector<std::string> Server::modeChanges(std::string mode) {
 	return (vMOde);
 }
 
+static void sendErrorMode(int fd, std::string channel_name, std::string nickname, std::string mode_changes) 
+{
+	std::string ERR_INVALIDMODEPARAM = ":ircserv 696 " + nickname + " #" + channel_name + " " + mode_changes + " : need an arg \r\n";
+	send(fd, ERR_INVALIDMODEPARAM.c_str(), ERR_INVALIDMODEPARAM.length(), MSG);
+	return ;
+}
+
 /**
  * mode
  * @brief set mode
@@ -639,16 +671,19 @@ std::vector<std::string> Server::modeChanges(std::string mode) {
 void Server::mode(int fd)
 {
 	std::stringstream iss(_clients[fd].getinfo().msg);
-	std::string sNull, channel_name, mode_changes, pwdOperSiz;
-	iss >> sNull >> channel_name >> mode_changes >> pwdOperSiz;
-
-	toUpper(channel_name);
+	std::string sNull, channel_name, mode_changes;
+	iss >> sNull >> channel_name >> mode_changes;
+	std::vector<std::string> argList;
 	std::vector<std::string> modeList = modeChanges(mode_changes);
-	if (isOpSizPawd(modeList) == true && !pwdOperSiz.empty( )) {
-		std::string ERR_INVALIDMODEPARAM = ":ircserv 696 " +  _clients[fd].getinfo().nickname + " #" + &channel_name[1] + " +k/+l/o : Can't set this param simultany in mode option\r\n";
-		send(fd, ERR_INVALIDMODEPARAM.c_str(), ERR_INVALIDMODEPARAM.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
-		return ;
-	}
+	while (iss >> mode_changes)
+		argList.push_back(mode_changes);
+	
+	toUpper(channel_name);
+	// if (isOpSizPawd(modeList) == true && !pwdOperSiz.empty( )) {
+	// 	std::string ERR_INVALIDMODEPARAM = ":ircserv 696 " +  _clients[fd].getinfo().nickname + " #" + &channel_name[1] + " +k/+l/o : Can't set this param simultany in mode option\r\n";
+	// 	send(fd, ERR_INVALIDMODEPARAM.c_str(), ERR_INVALIDMODEPARAM.length(), MSG);
+	// 	return ;
+	// }
 	mode_changes.clear( );
 	for (std::vector<std::string>::iterator itV = modeList.begin( ); itV != modeList.end( ); ++itV) {
 		mode_changes = *itV;
@@ -661,9 +696,19 @@ void Server::mode(int fd)
 			return ;
 		} else {
 			if (mode_changes == "+o") {
-				channel.modeOperator(fd, _clients[fd].Nickname(), pwdOperSiz);
+				if(argList.empty())	{
+					sendErrorMode(fd, &channel_name[1], _clients[fd].getinfo().nickname, mode_changes);
+					return ;
+				}
+				channel.modeOperator(fd, _clients[fd].Nickname(), argList[0]);
+				argList.erase(argList.begin( ));
 			} else if (mode_changes == "-o") {
-				channel.modeUnsetOperator(fd, _clients[fd].Nickname(), pwdOperSiz);
+				if(argList.empty())	{
+					sendErrorMode(fd, &channel_name[1], _clients[fd].getinfo().nickname, mode_changes);
+					return ;
+				}
+				channel.modeUnsetOperator(fd, _clients[fd].Nickname(), argList[0]);	
+				argList.erase(argList.begin( ));
 			} else if (mode_changes == "+b") {
 				;
 			} else if (mode_changes == "+t") {
@@ -677,25 +722,35 @@ void Server::mode(int fd)
 				for (std::map<std::string, int>::iterator it = channel.getinfo().users.begin(); it != channel.getinfo().users.end(); ++it) {
 					channel.addUserToInvited(it->first);
 				}
-				channel.getinfo().inviteOnly = true;
+				channel.setInvite(true);
 				channel.sendToAllUserModeChanges(_clients[fd].Nickname(), mode_changes);
 			} else if (mode_changes == "-i") {
-				channel.getinfo().inviteOnly = false;
+				channel.setInvite(false);
 				channel.sendToAllUserModeChanges(_clients[fd].Nickname(), mode_changes);
 			} else if (mode_changes == "+k") {
-				channel.modeSetKey(fd, _clients[fd].Nickname(), pwdOperSiz, mode_changes);
+				if(argList.empty())	{
+					sendErrorMode(fd, &channel_name[1], _clients[fd].getinfo().nickname, mode_changes);
+					return ;
+				}
+				channel.modeSetKey(fd, _clients[fd].Nickname(), argList[0], mode_changes);
+				argList.erase(argList.begin( ));
 			} else if (mode_changes == "-k"){
 				channel.setkey("");
 				channel.sendToAllUserModeChanges(_clients[fd].Nickname(), mode_changes);
 			} else if (mode_changes == "+l") {
-				channel.modeSetLimits(fd, _clients[fd].Nickname(), pwdOperSiz, mode_changes);
+				if(argList.empty())	{
+					sendErrorMode(fd, &channel_name[1], _clients[fd].getinfo().nickname, mode_changes);
+					return ;
+				}
+				channel.modeSetLimits(fd, _clients[fd].Nickname(), argList[0], mode_changes);
+				argList.erase(argList.begin( ));
 			} else if (mode_changes == "-l"){
 				channel.getinfo().limitLock = false;
 				channel.getinfo().limit = __INT_MAX__;
 				channel.sendToAllUserModeChanges(_clients[fd].Nickname(), mode_changes);
-			}else {
+			} else {
 				std::string ERR_UNKNOWNMODE = ":ircserv 501 " + _clients[fd].getinfo().nickname + " :Unknown MODE flag\r\n";
-				send(fd, ERR_UNKNOWNMODE.c_str(), ERR_UNKNOWNMODE.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+				send(fd, ERR_UNKNOWNMODE.c_str(), ERR_UNKNOWNMODE.size(), MSG);
 				return ;
 			}
 		}
@@ -717,10 +772,10 @@ void Server::topic(int fd) {
 	if (new_topic.empty( )) {
 		if (!channel.getinfo().topic.empty( )) {
 			std::string RPL_TOPIC = ":ircserv 332 " + _clients[fd].getinfo().nickname + " #" + &channel_name[1] + " :" + channel.getinfo().topic + "\r\n";
-			send(fd, RPL_TOPIC.c_str(), RPL_TOPIC.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+			send(fd, RPL_TOPIC.c_str(), RPL_TOPIC.size(), MSG);
 		} else {
 			std::string RPL_NOTOPIC = ":ircserv 331 " + _clients[fd].getinfo().nickname + " #" + &channel_name[1] + " :No topic is set\r\n";
-			send(fd, RPL_NOTOPIC.c_str(), RPL_NOTOPIC.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+			send(fd, RPL_NOTOPIC.c_str(), RPL_NOTOPIC.size(), MSG);
 		}
 		return ;
 	}
@@ -747,7 +802,7 @@ void Server::invite(int fd)
 	Channel& channel = _channels[&channel_name[1]];
 	if (channel.clientIsInChannel(nick, fd)){
 			std::string ERR_USERONCHANNEL = ":ircserv 443 " + _clients[fd].getinfo().nickname + " " + nick + " " + channel_name + " :is already on channel\r\n"; 
-			send(fd, ERR_USERONCHANNEL.c_str(), ERR_USERONCHANNEL.size(), 0);
+			send(fd, ERR_USERONCHANNEL.c_str(), ERR_USERONCHANNEL.size(), MSG);
 			return ;
 	}
 	std::map<int, Client>::iterator it = _clients.begin();
@@ -756,13 +811,13 @@ void Server::invite(int fd)
 			channel.addUserToInvited(it->second.Nickname());
 			std::string RPL_INVITING = ":ircserv 341 " + _clients[fd].getinfo().nickname + " " + nick + " " + channel_name + "\r\n";
 			std::string RPL_INVITE = ":" + _clients[fd].getinfo().nickname + "!~" + _clients[fd].getinfo().username + hostname  + " INVITE " + nick + " " + channel_name + "\r\n";
-			send(_clients[fd].getinfo().fd, RPL_INVITING.c_str(), RPL_INVITING.size(), 0);
-			send(it->second.getinfo().fd, RPL_INVITE.c_str(), RPL_INVITE.size(), 0);
+			send(_clients[fd].getinfo().fd, RPL_INVITING.c_str(), RPL_INVITING.size(), MSG);
+			send(it->second.getinfo().fd, RPL_INVITE.c_str(), RPL_INVITE.size(), MSG);
 			return ;
 		}
 	}
     std::string ERR_NOSUCHNICK = ":ircserv 401 " + _clients[fd].getinfo().nickname + " " + nick + " :No such nick\r\n";
-	send(fd, ERR_NOSUCHNICK.c_str(), ERR_NOSUCHNICK.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+	send(fd, ERR_NOSUCHNICK.c_str(), ERR_NOSUCHNICK.length(), MSG);
 }
 
 /**
@@ -785,12 +840,12 @@ void Server::kick(int fd) {
 		return ;
 	if (user_nickname.empty( )) {
 		std::string ERR_NEEDMOREPARAMS = ":ircserv 461 " + _clients[fd].Nickname() + " KICK :Not enough parameters\r\n";
-		send(fd, ERR_NEEDMOREPARAMS.c_str(), ERR_NEEDMOREPARAMS.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_NEEDMOREPARAMS.c_str(), ERR_NEEDMOREPARAMS.length(), MSG);
 		return ;
 	}
 	if(!channel.userIsInChannel(user_nickname)) {
 		std::string ERR_USERNOTINCHANNEL = ":serverirc 441 " + _clients[fd].Nickname() + " " + user_nickname + " " + channel_name + " :They aren't on that channel\r\n";
-		send(fd, ERR_USERNOTINCHANNEL.c_str(), ERR_USERNOTINCHANNEL.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_USERNOTINCHANNEL.c_str(), ERR_USERNOTINCHANNEL.size(), MSG);
 		return ;
 	}
 	//:WiZ!jto@tolsun.oulu.fi KICK #Finnish John
@@ -800,8 +855,120 @@ void Server::kick(int fd) {
 	channel.sendMessageToAll(RPL_KICKMSG);
 	std::string RPL_YOUKICK = ":ircserv 441 " + _clients[fd].Nickname() + "kicked you from " + channel_name + "\r\n";
 	channel.removeInvited(user_nickname);
-	_clients[channel.getinfo().users[user_nickname]].setMsg("PART " + channel_name + + " :Kicked by " + _clients[fd].Nickname() + "\r\n");
-	singlePart(channel.getinfo().users[user_nickname], false);
-	send (_channels[&channel_name[1]].getinfo().users[user_nickname], RPL_YOUKICK.c_str(), RPL_YOUKICK.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+	_clients[channel.getinfo().users[user_nickname]].setMsg("PART " + channel_name);
+	send (_channels[&channel_name[1]].getinfo().users[user_nickname], RPL_YOUKICK.c_str(), RPL_YOUKICK.size(), MSG);
+	multiPart(channel.getinfo().users[user_nickname]);
+
 }
 
+ /**
+ * addBot
+ * @brief Add bot to channel
+*/
+void Server::addBot()
+{
+	ClientInfo info;
+	info.fd = 1000;
+	info.nickname = "Bottone";
+	info.username = "Bottone";
+	info.isFirstTime = false;
+	info.authorized = true;
+	info.msg = "JOIN #WELCOME";
+ 	_clients.insert(std::make_pair(info.fd, Client(info)));
+	singleJoin(1000);
+}
+
+/**
+ * botMode
+ * @brief Set mode bot
+ * @param message message to send
+*/
+void Server::botMode(std::string msg)
+{
+	std::istringstream iss(msg);
+	std::string nString, message;
+	iss >> nString >> message;
+	trimInput(message);
+	if (!message.empty()) {
+		toUpper(message);
+		if (!message.compare("CIAO"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Cia'\r\n");
+		else if (!message.compare("AIUTO"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Chiedi a Damiano, lui sapra'!\r\n ");
+		else if (!message.compare("BTANI"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Ma nudo? BLU?\r\n ");
+		else if (!message.compare("STE"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Se indossi una maglietta cripto, non sei nessuno\r\n ");
+		else if (!message.compare("VICTOR"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Non ha voce e grida fa, non ha ali e a volo va, non ha denti e morsi dà, non ha bocca e versi fa... La risposta era scritta sul quaderno, pero' l'ho buttato. MANNAGGIA!\r\n ");
+		else if (!message.compare("LUPE"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Ti va un penetration test?\r\n ");
+		else if (!message.compare("NIZ"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Bella prova, ma resta sempre una prova, facciamo una Anna?\r\n ");			
+		else if (!message.compare("SIMO"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaah!\r\n");
+		else if (!message.compare("ALEGRE"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME 🙌");
+		else if (!message.compare("PING"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME e ja, veramente ti aspettavi un pong?!\r\n");
+		else if (!message.compare("NELLY"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME No.\r\n");
+		else if (!message.compare("FRATM"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Eh succede sorm...");
+		else if (!message.compare("DIP"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Che bella la vita tatantatan tatantatan ...\r\n");
+		else if (!message.compare("PACCI"))
+			_clients[1000].setMsg("PRIVMSG #WELCOME Se nimmondo ci fosse un po' di bene, e ognun si considerasse i su fratello... \r\n");
+		else if (!message.compare("GABRY"))
+		{
+			int i = rand() % 4;
+			std::string msg = "PRIVMSG #WELCOME ";
+			switch (i)
+			{
+				case 0:
+					_clients[1000].setMsg(msg + "Chiude una lavanderia. Faceva affari sporchi.\r\n");
+					break;
+				case 1:
+					_clients[1000].setMsg(msg + "Ragazza stufa scappa di casa. Genitori morti dal freddo.\r\n");
+					break;
+				case 2:
+					_clients[1000].setMsg(msg + "Abbiamo riso abbastanza, adesso pasta.\r\n");
+					break;
+				case 3:
+					_clients[1000].setMsg(msg + "Chiude una fabbrica di carta igienica: andava a rotoli.\r\n");
+					break;
+				default:
+					_clients[1000].setMsg(msg + "Abbiamo riso abbastanza, adesso pasta.\r\n");
+					break;
+			}
+		} else if (!message.compare("BEPPE"))
+		{
+			int i = rand() % 4;
+			std::string msg = "PRIVMSG #WELCOME ";
+			switch (i)
+			{
+				case 0:
+					_clients[1000].setMsg(msg + "Lo sapevi che  se dici Jesus al contrario suona come sausage.\r\n");
+					break;
+				case 1:
+					_clients[1000].setMsg(msg + "Lo sapevi che gli orsi polari sono mancini.\r\n");
+					break;
+				case 2:
+					_clients[1000].setMsg(msg + "Lo sapevi che il gatto é l'unico animale domestico non menzionato nella Bibbia.\r\n");
+					break;
+				case 3:
+					_clients[1000].setMsg(msg + "Lo sapevi che non ti puoi leccare i gomiti.\r\n");
+					break;
+				default:
+					_clients[1000].setMsg(msg + "Lo sapevi che Se tu urlassi per 8 anni 7 mesi e 6 giorni, produrresti abbastanza energia sonora per riscaldare una tazza di caffè.\r\n");
+					break;
+			}
+		}
+	else
+		_clients[1000].setMsg("PRIVMSG #WELCOME Sono proprio io, il Bot piu' inutile del mondo! E tu mi stai veramente sopravvalutando, so rispondere solo a: -ciao -ping -aiuto -Gabry -Beppe -Nelly -Simo -Alegre -Niz -Victor -Ste -Btani -Lupe -Pacci -Dip -Fratm\r\n");
+	} else {
+		_clients[1000].setMsg("PRIVMSG #WELCOME Sono proprio io, il Bot piu' inutile del mondo! scegli un comando tra: -ciao -ping -aiuto -Gabry -Beppe -Nelly -Simo -Alegre -Niz -Victor -Ste -Btani -Lupe -Pacci -Dip -Fratm\r\n");
+	}
+	singleMessage(1000);
+	return ;
+}

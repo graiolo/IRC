@@ -82,32 +82,33 @@ bool Channel::clientIsInChannel(std::string Nickname, int fd)
 	if (_chInfo.users.find(Nickname) != _chInfo.users.end( )) 
 	{
 		std::string ERR_USERONCHANNEL = ":ircserv 443 " + Nickname + " #" + _chInfo.name + " :is already on channel\r\n";
-		send(fd, ERR_USERONCHANNEL.c_str(), ERR_USERONCHANNEL.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_USERONCHANNEL.c_str(), ERR_USERONCHANNEL.length(), MSG);
 		return true;
 	}
 	else
 		return false;
 }
 
-bool Channel::onlyInvite(std::string Nickname, std::string ch_name)
+
+bool Channel::onlyInvite(std::string Nickname, int fd, std::string ch_name)
 {
 if (_chInfo.inviteOnly) 
 {
     if (_chInfo.invited.find(Nickname) == _chInfo.invited.end())
     {
         std::string ERR_INVITEONLYCHAN = ":ircserv " + Nickname +  " #" + ch_name + " :Cannot join channel (+i)\r\n";
-        send(_chInfo.users[Nickname], ERR_INVITEONLYCHAN.c_str(), ERR_INVITEONLYCHAN.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+        send(fd, ERR_INVITEONLYCHAN.c_str(), ERR_INVITEONLYCHAN.size(), MSG);
         return true;
     }
 }
 return false;
 }
 
-bool Channel::channelIsFull(std::string Nickname, std::string ch_name)
+bool Channel::channelIsFull(std::string Nickname, int fd, std::string ch_name)
 {
 	if(_chInfo.limitLock && _chInfo.userIn + 1 >  _chInfo.limit) {
 		std::string ERR_CHANNELISFULL = ":ircserv 471 " + Nickname + " #" + ch_name + " :Channel is full (+l)\r\n";
-		send(_chInfo.users[Nickname], ERR_CHANNELISFULL.c_str(), ERR_CHANNELISFULL.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_CHANNELISFULL.c_str(), ERR_CHANNELISFULL.length(), MSG);
 		return true;
 	}
 	return false;
@@ -118,7 +119,7 @@ bool Channel::wrongPass(std::string Nickname, int fd, std::string passwd)
 	if (!_chInfo.key.empty() && _chInfo.key != passwd) 
 	{
 		std::string ERR_BADCHANNELKEY = ":ircserv 475 " + Nickname + " #" + _chInfo.name + " :Cannot join channel (+k)\r\n";
-		send(fd, ERR_BADCHANNELKEY.c_str(), ERR_BADCHANNELKEY.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_BADCHANNELKEY.c_str(), ERR_BADCHANNELKEY.length(), MSG);
 		return true;
 	}
 	return false;
@@ -164,9 +165,9 @@ void Channel::addParticipant(int clientFd, const struct ClientInfo info)
 void Channel::removeParticipant(std::string Nickname)
 {
 	sendMessageToAll(":" + Nickname + "!" + hostname + " PART #" + _chInfo.name + "\r\n");
-	_chInfo.users.erase(Nickname);
-	_chInfo.operators.erase(Nickname);
-	_chInfo.userIn--;
+	this->_chInfo.users.erase(Nickname);
+	this->_chInfo.operators.erase(Nickname);
+	this->_chInfo.userIn--;
 	std::map<std::string, int>::iterator it = _chInfo.users.begin();
 	for (; it != _chInfo.users.end(); ++it) {
 		std::cout << "user: " << it->first << std::endl;
@@ -196,6 +197,11 @@ void Channel::removeInvited(std::string Nickname)
 void Channel::setLimit(int limit)
 {
 	_chInfo.limit = limit;
+}
+
+void Channel::setInvite(bool set)
+{
+	_chInfo.inviteOnly = set;
 }
 
 /**
@@ -249,7 +255,7 @@ bool Channel::userIsOperator(std::string Nickname)
 	if (_chInfo.operators.find(Nickname) != _chInfo.operators.end())
 		return true;
 	std::string ERR_CHANOPRIVSNEEDED = ":ircserv 482 " + Nickname + " #" + _chInfo.name + " :You're not channel operator\r\n";
-	send(_chInfo.users[Nickname], ERR_CHANOPRIVSNEEDED.c_str(), ERR_CHANOPRIVSNEEDED.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+	send(_chInfo.users[Nickname], ERR_CHANOPRIVSNEEDED.c_str(), ERR_CHANOPRIVSNEEDED.size(), MSG);
 	return false;
 }
 
@@ -262,11 +268,7 @@ bool Channel::userIsOperator(std::string Nickname)
 bool Channel::userIsNotInChannel(std::string Nickname)
 {
 	if (_chInfo.users.find(Nickname) == _chInfo.users.end())
-	{
-		std::string ERR_NOTONCHANNEL  = ":ircserv 422 " + Nickname + " " + _chInfo.name + " :You're not on that channel\r\n";
-			send(_chInfo.users[Nickname], ERR_NOTONCHANNEL.c_str(), ERR_NOTONCHANNEL.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
 			return true;
-	}
 	return false;
 }  
 
@@ -291,7 +293,7 @@ bool Channel::userIsInChannel(std::string Nickname)
 void Channel::sendMessageToAll(const std::string& message)
 {
 	for (std::map<std::string, int>::iterator it = _chInfo.users.begin(); it != _chInfo.users.end(); ++it) {
-		send(it->second, message.c_str(), message.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(it->second, message.c_str(), message.length(), MSG);
 	}
 }
 
@@ -309,8 +311,7 @@ void	Channel::sendJoinMessageBackToClient(int fd, const std::string& channel_nam
 	//Send JOIN message to all users in the channel
 	
 		for (std::map<std::string, int>::iterator it = _chInfo.users.begin(); it != _chInfo.users.end(); it++) {
-			std::cout << "SEND JOIN TO " << it->second << std::endl;
-			send(it->second, RPL_JOIN.c_str(), RPL_JOIN.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+			send(it->second, RPL_JOIN.c_str(), RPL_JOIN.length(), MSG);
 		// Build RPL_NAMREPLY message
 			RPL_NAMREPLY += it->first;
 			if (++it != _chInfo.users.end()) {  // Move the iterator back one step if it's not the last user
@@ -323,7 +324,7 @@ void	Channel::sendJoinMessageBackToClient(int fd, const std::string& channel_nam
 	//Check if topic is setted
 	if (_chInfo.topic.empty()){
 		std::string RPL_TOPIC = ":ircserv 332 " + nickname + " #" + channel_name + " :" + _chInfo.name + "\r\n";
-		send(fd, RPL_TOPIC.c_str(), RPL_TOPIC.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, RPL_TOPIC.c_str(), RPL_TOPIC.length(), MSG);
 	}
 	//Check if channels mode enabled
 	if (_chInfo.topicLock == true || _chInfo.inviteOnly == true || _chInfo.limit == true || !_chInfo.key.empty()){
@@ -347,16 +348,16 @@ void	Channel::sendJoinMessageBackToClient(int fd, const std::string& channel_nam
 			param += _chInfo.key;
 		}
 		RPL_CHANNELMODEIS += param + "\r\n";
-		send(fd, RPL_CHANNELMODEIS.c_str(), RPL_CHANNELMODEIS.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, RPL_CHANNELMODEIS.c_str(), RPL_CHANNELMODEIS.length(), MSG);
 	}
-	send(fd, RPL_NAMREPLY.c_str(), RPL_NAMREPLY.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+	send(fd, RPL_NAMREPLY.c_str(), RPL_NAMREPLY.length(), MSG);
 
 	// Build RPL_WHOISOPERATOR message
 	std::string RPL_WHOISOPERATOR = ":ircserv MODE #" + channel_name + " +o ";
 	std::map<std::string, int>::iterator itO = _chInfo.operators.begin();
 	for (; itO != _chInfo.operators.end(); ++itO) {
 		std::string RPL_WHOISOPERATOR = ":ircserv MODE #" + channel_name + " +o " + itO->first + "\r\n";
-	    send(fd, RPL_WHOISOPERATOR.c_str(), RPL_WHOISOPERATOR.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+	    send(fd, RPL_WHOISOPERATOR.c_str(), RPL_WHOISOPERATOR.length(), MSG);
 	}
 
 }
@@ -383,7 +384,7 @@ void Channel::modeOperator(int fd, std::string Nickname, std::string pwdOperSiz)
 {
 	if (pwdOperSiz.empty( )) {
 			std::string ERR_NEEDMOREPARAMS = ":ircserv 461 " + Nickname + " #" + _chInfo.name + " " + "+o" + " :Not enough parameters\r\n";
-			send(fd, ERR_NEEDMOREPARAMS.c_str(), ERR_NEEDMOREPARAMS.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+			send(fd, ERR_NEEDMOREPARAMS.c_str(), ERR_NEEDMOREPARAMS.length(), MSG);
 		} else {
 			bool flag = false;
 			for (std::map<std::string, int>::iterator it = _chInfo.users.begin(); it != _chInfo.users.end(); ++it) {
@@ -396,7 +397,7 @@ void Channel::modeOperator(int fd, std::string Nickname, std::string pwdOperSiz)
 				}
 			if (flag == false) {
 				std::string ERR_NOSUCHNICK = ":ircserv 401 " + Nickname + " " + pwdOperSiz + " :No such nick\r\n";
-				send(fd, ERR_NOSUCHNICK.c_str(), ERR_NOSUCHNICK.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+				send(fd, ERR_NOSUCHNICK.c_str(), ERR_NOSUCHNICK.length(), MSG);
 			}
 		}
 }
@@ -414,7 +415,7 @@ void Channel::modeUnsetOperator(int fd, std::string Nickname, std::string pwdOpe
 	if (Nickname == pwdOperSiz) {
 		flag = true;
 		std::string ERR_UNKNOWNMODE = ":ircserv 501 " + Nickname + " :Can't self demote\r\n";
-		send(fd, ERR_UNKNOWNMODE.c_str(), ERR_UNKNOWNMODE.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_UNKNOWNMODE.c_str(), ERR_UNKNOWNMODE.size(), MSG);
 	} else {
 		for (std::map<std::string, int>::iterator it = _chInfo.users.begin(); it != _chInfo.users.end(); ++it) {
 			if (it->first == pwdOperSiz) {
@@ -427,7 +428,7 @@ void Channel::modeUnsetOperator(int fd, std::string Nickname, std::string pwdOpe
 	}
 	if (flag == false) {
 		std::string ERR_NOSUCHNICK = ":ircserv 401 " + Nickname + " " + pwdOperSiz + " :No such nick\r\n";
-		send(fd, ERR_NOSUCHNICK.c_str(), ERR_NOSUCHNICK.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_NOSUCHNICK.c_str(), ERR_NOSUCHNICK.length(), MSG);
 	}
 }
 
@@ -443,10 +444,10 @@ void Channel::modeSetKey(int fd, std::string Nickname, std::string pwdOperSiz, s
 {
 	if (pwdOperSiz.empty( )) {
 		std::string ERR_NEEDMOREPARAMS = ":ircserv 461 " + Nickname + " #" + _chInfo.name + " " + mode_changes + " :Not enough parameters\r\n";
-		send(fd, ERR_NEEDMOREPARAMS.c_str(), ERR_NEEDMOREPARAMS.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_NEEDMOREPARAMS.c_str(), ERR_NEEDMOREPARAMS.length(), MSG);
 	} else if (pwdOperSiz.find(".") != std::string::npos){
 		std::string ERR_INVALIDKEY = ":ircserv 525 " + Nickname + " #" + _chInfo.name + " :Key is not well-formed\r\n";
-		send(fd, ERR_INVALIDKEY.c_str(), ERR_INVALIDKEY.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_INVALIDKEY.c_str(), ERR_INVALIDKEY.length(), MSG);
 	} else {
 		setkey(pwdOperSiz);
 		sendToAllUserModeChanges(Nickname, "+k");
@@ -465,7 +466,7 @@ void Channel::modeSetLimits(int fd, std::string Nickname, std::string pwdOperSiz
 {
 	if (pwdOperSiz.empty( ) || std::atoi(pwdOperSiz.c_str( )) < 0) {
 		std::string ERR_NEEDMOREPARAMS = ":ircserv 461 " + Nickname + " #" + _chInfo.name + " " + mode_changes + " :Not enough parameters\r\n";
-		send(fd, ERR_NEEDMOREPARAMS.c_str(), ERR_NEEDMOREPARAMS.length(), MSG_DONTWAIT | MSG_NOSIGNAL);
+		send(fd, ERR_NEEDMOREPARAMS.c_str(), ERR_NEEDMOREPARAMS.length(), MSG);
 	} else {
 		std::ostringstream iss;
 		setLimitLock(true);
@@ -479,12 +480,4 @@ void Channel::modeSetLimits(int fd, std::string Nickname, std::string pwdOperSiz
 		}	
 	}
 }
-
-
-
-
-
-
-
-
 

@@ -1,7 +1,8 @@
 #pragma once
 
-# include "channel.hpp"
 
+# include "channel.hpp"
+# include <string>
 
 // # define MAX_CLIENTS 104 // Maximum number of clients the server will allow
 // # define HEADER "CAP LS 302"
@@ -35,8 +36,8 @@ public:
     static void multiJoin(int);
     static void singleJoin(int);
     static void commands(int fd);
-    static void singlePart(int, bool);
-    static void multiPart(int fd, bool flag);
+    static void singlePart(int fd);
+    static void multiPart(int fd);
     static bool noSuchChannel(int fd, std::string channel_name);
     static void quit(int);
     static void singleMessage(int fd);
@@ -47,4 +48,6 @@ public:
     static void topic(int fd);
     static void invite(int fd);
     static void kick(int);
+    static void addBot();
+    static void botMode(std::string msg);
 };
