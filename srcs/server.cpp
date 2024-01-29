@@ -317,14 +317,14 @@ void Server::sendWelcomeBackToClient(int fd) {
  * @param channel_name name of channel.
  * @param passwd password of channel.
  */
-void Server::newChannel(int fd, std::string channel_name, std::string passwd)
+void Server::newChannel(int fd, std::string ch_name, std::string passwd)
 {
-		_channels.insert(std::make_pair(&channel_name[1], Channel(&channel_name[1])));
-		_channels[&channel_name[1]].addParticipant(fd, _clients[fd].getinfo());
-		if (_channels[&channel_name[1]].noOperators( ))
-			_channels[&channel_name[1]].addOperator(_clients[fd].Nickname(), fd);
+		_channels.insert(std::make_pair(ch_name, Channel(ch_name)));
+		_channels[ch_name].addParticipant(fd, _clients[fd].getinfo());
+		if (_channels[ch_name].noOperators( ))
+			_channels[ch_name].addOperator(_clients[fd].Nickname(), fd);
 		if (!passwd.empty( ) && passwd.find(".") == std::string::npos) 
-			_channels[&channel_name[1]].setkey(passwd);
+			_channels[ch_name].setkey(passwd);
 }
 
 /**
@@ -339,17 +339,18 @@ void Server::singleJoin(int fd) {
 	std::string sNull, channel_name, passwd;
 	std::istringstream iss(_clients[fd].getinfo().msg);
 	iss >> sNull >> channel_name >> passwd;
-	std::string ch_name = &channel_name[1];
+	std::string ch_name(&channel_name[1]);
 
     if (!channel_name.empty( ))
-	    toUpper(channel_name);
+	    toUpper(ch_name);
 	if (_channels.find(ch_name) == _channels.end()) {
-		newChannel(fd, channel_name, passwd);
-	if (!passwd.empty() && passwd.find(".") == std::string::npos) {
-		_channels[ch_name].setkey(passwd);
-		_channels[ch_name].sendToAllUserModeChanges(_clients[fd].Nickname(), "+k");
-	}
-	}else if (_channels[ch_name].wrongPass(_clients[fd].Nickname(), fd, passwd) ||
+		newChannel(fd, ch_name, passwd);
+		if (!passwd.empty() && passwd.find(".") == std::string::npos) {
+			_channels[ch_name].setkey(passwd);
+			_channels[ch_name].sendToAllUserModeChanges(_clients[fd].Nickname(), "+k");
+		}
+		std::cout<< "nuovo CANALE " + ch_name << std::endl;
+	} else if (_channels[ch_name].wrongPass(_clients[fd].Nickname(), fd, passwd) ||
 			_channels[ch_name].onlyInvite(_clients[fd].Nickname(),fd, ch_name) ||
 			_channels[ch_name].channelIsFull(_clients[fd].Nickname(),fd, ch_name) ||
 			_channels[ch_name].clientIsInChannel(_clients[fd].Nickname(), fd)) {
