@@ -61,11 +61,11 @@ Implementation of signal handling for graceful server shutdown and error recover
 Clone the project
 
 ```bash
-https://github.com/IvanaRagusa/irc_server
+https://github.com/graiolo/IRC.git
 ```
 Go to the project directory
 ```bash
-cd irc_server
+cd IRC
 ```
 compile
 ```bash
